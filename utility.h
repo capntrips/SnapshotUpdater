@@ -29,7 +29,7 @@
 #include <libsnapshot/auto_device.h>
 #include <libsnapshot/snapshot.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 // Unit is sectors, this is a 4K chunk.
@@ -140,4 +140,4 @@ bool IsIouringEnabled();
 // Swap the suffix of a partition name.
 std::string GetOtherPartitionName(const std::string& name);
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

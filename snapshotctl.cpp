@@ -35,14 +35,14 @@ int Usage() {
                  "Actions:\n"
                  "  dump\n"
                  "    Print snapshot states.\n"
-                 "  merge\n"
-                 "    Deprecated.\n"
                  "  map\n"
-                 "    Map all partitions at /dev/block/mapper\n";
+                 "    Map all snapshots at /dev/block/mapper\n"
+                 "  unmap\n"
+                 "    Unmap all snapshots at /dev/block/mapper\n";
     return EX_USAGE;
 }
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 bool DumpCmdHandler(int /*argc*/, char** argv) {
@@ -61,26 +61,19 @@ bool UnmapCmdHandler(int, char** argv) {
     return SnapshotManager::New()->UnmapAllSnapshots();
 }
 
-bool MergeCmdHandler(int /*argc*/, char** argv) {
-    android::base::InitLogging(argv, &android::base::StderrLogger);
-    LOG(WARNING) << "Deprecated. Call update_engine_client --merge instead.";
-    return false;
-}
-
 static std::map<std::string, std::function<bool(int, char**)>> kCmdMap = {
         // clang-format off
         {"dump", DumpCmdHandler},
-        {"merge", MergeCmdHandler},
         {"map", MapCmdHandler},
         {"unmap", UnmapCmdHandler},
         // clang-format on
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips
 
 int main(int argc, char** argv) {
-    using namespace android::snapshot;
+    using namespace capntrips::snapshot;
     if (argc < 2) {
         return Usage();
     }

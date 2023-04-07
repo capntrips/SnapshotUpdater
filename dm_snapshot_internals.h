@@ -21,7 +21,7 @@
 #include <optional>
 #include <unordered_set>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 class DmSnapCowSizeCalculator {
@@ -144,4 +144,4 @@ class DmSnapCowSizeCalculator {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

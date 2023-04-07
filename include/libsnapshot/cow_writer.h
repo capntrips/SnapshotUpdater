@@ -24,7 +24,7 @@
 #include <libsnapshot/cow_format.h>
 #include <libsnapshot/cow_reader.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 struct CowOptions {
@@ -171,4 +171,4 @@ class CowWriter : public ICowWriter {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

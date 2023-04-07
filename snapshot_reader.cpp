@@ -20,7 +20,7 @@
 #include <android-base/logging.h>
 #include <ext4_utils/ext4_utils.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 using android::base::borrowed_fd;
@@ -352,4 +352,4 @@ bool CompressedSnapshotReader::Flush() {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

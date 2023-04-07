@@ -24,7 +24,7 @@
 #include <android-base/unique_fd.h>
 #include <libsnapshot/cow_format.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 class ICowOpIter;
@@ -180,4 +180,4 @@ class CowReader final : public ICowReader {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

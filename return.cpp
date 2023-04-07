@@ -18,7 +18,7 @@
 
 using android::fiemap::FiemapStatus;
 
-namespace android::snapshot {
+namespace capntrips::snapshot {
 
 std::string Return::string() const {
     switch (error_code()) {
@@ -41,4 +41,4 @@ Return::ErrorCode Return::FromFiemapStatusErrorCode(FiemapStatus::ErrorCode erro
             return ErrorCode::ERROR;
     }
 }
-}  // namespace android::snapshot
+}  // namespace capntrips::snapshot

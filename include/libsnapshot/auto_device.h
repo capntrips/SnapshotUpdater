@@ -18,7 +18,7 @@
 
 #include <android-base/macros.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 // An abstract "device" that will be cleaned up (unmapped, unmounted, etc.) upon
@@ -39,4 +39,4 @@ struct AutoDevice {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

@@ -28,7 +28,7 @@
 #include <libsnapshot/cow_writer.h>
 #include <zlib.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 static_assert(sizeof(off_t) == sizeof(uint64_t));
@@ -606,4 +606,4 @@ bool CowWriter::Truncate(off_t length) {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

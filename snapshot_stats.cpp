@@ -18,9 +18,10 @@
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
+#include "device_info.h"
 #include "utility.h"
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 SnapshotMergeStats* SnapshotMergeStats::GetInstance(SnapshotManager& parent) {
@@ -84,7 +85,7 @@ bool SnapshotMergeStats::Start() {
     return WriteState();
 }
 
-void SnapshotMergeStats::set_state(android::snapshot::UpdateState state, bool using_compression) {
+void SnapshotMergeStats::set_state(capntrips::snapshot::UpdateState state, bool using_compression) {
     report_.set_state(state);
     report_.set_compression_enabled(using_compression);
 }
@@ -177,4 +178,4 @@ std::unique_ptr<SnapshotMergeStats::Result> SnapshotMergeStats::Finish() {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

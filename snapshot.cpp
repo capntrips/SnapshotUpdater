@@ -42,7 +42,7 @@
 #include <libfiemap/image_manager.h>
 #include <liblp/liblp.h>
 
-#include <android/snapshot/snapshot.pb.h>
+#include <capntrips/snapshot/snapshot.pb.h>
 #include <libsnapshot/snapshot_stats.h>
 #include "device_info.h"
 #include "partition_cow_creator.h"
@@ -50,7 +50,10 @@
 #include "snapshot_reader.h"
 #include "utility.h"
 
-namespace android {
+using android::snapshot::kSnapuserdSocket;
+using android::snapshot::EnsureSnapuserdStarted;
+
+namespace capntrips {
 namespace snapshot {
 
 using android::base::unique_fd;
@@ -93,7 +96,7 @@ MergeFailureCode CheckMergeConsistency(const std::string& name, const SnapshotSt
 // destructor doesn't work.
 SnapshotManager::~SnapshotManager() {}
 
-std::unique_ptr<SnapshotManager> SnapshotManager::New(IDeviceInfo* info) {
+std::unique_ptr<SnapshotManager> SnapshotManager::New(DeviceInfo* info) {
     if (!info) {
         info = new DeviceInfo();
     }
@@ -101,7 +104,7 @@ std::unique_ptr<SnapshotManager> SnapshotManager::New(IDeviceInfo* info) {
     return std::unique_ptr<SnapshotManager>(new SnapshotManager(info));
 }
 
-std::unique_ptr<SnapshotManager> SnapshotManager::NewForFirstStageMount(IDeviceInfo* info) {
+std::unique_ptr<SnapshotManager> SnapshotManager::NewForFirstStageMount(DeviceInfo* info) {
     if (!info) {
         DeviceInfo* impl = new DeviceInfo();
         impl->set_first_stage_init(true);
@@ -109,17 +112,15 @@ std::unique_ptr<SnapshotManager> SnapshotManager::NewForFirstStageMount(IDeviceI
     }
     auto sm = New(info);
 
-    // The first-stage version of snapuserd is explicitly started by init. Do
-    // not attempt to using it during tests (which run in normal AOSP).
-    if (!sm->device()->IsTestDevice()) {
-        sm->use_first_stage_snapuserd_ = true;
-    }
+    // The first-stage version of snapuserd is explicitly started by init.
+    sm->use_first_stage_snapuserd_ = true;
+
     return sm;
 }
 
-SnapshotManager::SnapshotManager(IDeviceInfo* device)
+SnapshotManager::SnapshotManager(DeviceInfo* device)
     : dm_(device->GetDeviceMapper()), device_(device), metadata_dir_(device_->GetMetadataDir()) {
-    merge_consistency_checker_ = android::snapshot::CheckMergeConsistency;
+    merge_consistency_checker_ = capntrips::snapshot::CheckMergeConsistency;
 }
 
 static std::string GetCowName(const std::string& snapshot_name) {
@@ -1471,7 +1472,7 @@ void SnapshotManager::AcknowledgeMergeSuccess(LockedFile* lock) {
 
     RemoveAllUpdateState(lock);
 
-    if (UpdateUsesUserSnapshots(lock) && !device()->IsTestDevice()) {
+    if (UpdateUsesUserSnapshots(lock)) {
         if (snapuserd_client_) {
             snapuserd_client_->DetachSnapuserd();
             snapuserd_client_->CloseConnection();
@@ -3243,66 +3244,42 @@ Return SnapshotManager::CreateUpdateSnapshots(const DeltaArchiveManifest& manife
     status.set_state(update_state);
     status.set_compression_enabled(cow_creator.compression_enabled);
     if (cow_creator.compression_enabled) {
-        if (!device()->IsTestDevice()) {
-            bool userSnapshotsEnabled = IsUserspaceSnapshotsEnabled();
-            const std::string UNKNOWN = "unknown";
-            const std::string vendor_release = android::base::GetProperty(
-                    "ro.vendor.build.version.release_or_codename", UNKNOWN);
+        bool userSnapshotsEnabled = IsUserspaceSnapshotsEnabled();
+        const std::string UNKNOWN = "unknown";
+        const std::string vendor_release = android::base::GetProperty(
+                "ro.vendor.build.version.release_or_codename", UNKNOWN);
 
-            // No user-space snapshots if vendor partition is on Android 12
-            if (vendor_release.find("12") != std::string::npos) {
-                LOG(INFO) << "Userspace snapshots disabled as vendor partition is on Android: "
-                          << vendor_release;
-                userSnapshotsEnabled = false;
-            }
+        // No user-space snapshots if vendor partition is on Android 12
+        if (vendor_release.find("12") != std::string::npos) {
+            LOG(INFO) << "Userspace snapshots disabled as vendor partition is on Android: "
+                      << vendor_release;
+            userSnapshotsEnabled = false;
+        }
 
-            // Userspace snapshots is enabled only if compression is enabled
-            status.set_userspace_snapshots(userSnapshotsEnabled);
-            if (userSnapshotsEnabled) {
-                is_snapshot_userspace_ = true;
-                status.set_io_uring_enabled(IsIouringEnabled());
-                LOG(INFO) << "Userspace snapshots enabled";
-            } else {
-                is_snapshot_userspace_ = false;
-                LOG(INFO) << "Userspace snapshots disabled";
-            }
-
-            // Terminate stale daemon if any
-            std::unique_ptr<SnapuserdClient> snapuserd_client =
-                    SnapuserdClient::Connect(kSnapuserdSocket, 5s);
-            if (snapuserd_client) {
-                snapuserd_client->DetachSnapuserd();
-                snapuserd_client->CloseConnection();
-                snapuserd_client = nullptr;
-            }
-
-            // Clear the cached client if any
-            if (snapuserd_client_) {
-                snapuserd_client_->CloseConnection();
-                snapuserd_client_ = nullptr;
-            }
+        // Userspace snapshots is enabled only if compression is enabled
+        status.set_userspace_snapshots(userSnapshotsEnabled);
+        if (userSnapshotsEnabled) {
+            is_snapshot_userspace_ = true;
+            status.set_io_uring_enabled(IsIouringEnabled());
+            LOG(INFO) << "Userspace snapshots enabled";
         } else {
-            bool userSnapshotsEnabled = true;
-            const std::string UNKNOWN = "unknown";
-            const std::string vendor_release = android::base::GetProperty(
-                    "ro.vendor.build.version.release_or_codename", UNKNOWN);
+            is_snapshot_userspace_ = false;
+            LOG(INFO) << "Userspace snapshots disabled";
+        }
 
-            // No user-space snapshots if vendor partition is on Android 12
-            if (vendor_release.find("12") != std::string::npos) {
-                LOG(INFO) << "Userspace snapshots disabled as vendor partition is on Android: "
-                          << vendor_release;
-                userSnapshotsEnabled = false;
-            }
+        // Terminate stale daemon if any
+        std::unique_ptr<SnapuserdClient> snapuserd_client =
+                SnapuserdClient::Connect(kSnapuserdSocket, 5s);
+        if (snapuserd_client) {
+            snapuserd_client->DetachSnapuserd();
+            snapuserd_client->CloseConnection();
+            snapuserd_client = nullptr;
+        }
 
-            userSnapshotsEnabled = (userSnapshotsEnabled && !IsDmSnapshotTestingEnabled());
-            status.set_userspace_snapshots(userSnapshotsEnabled);
-            if (!userSnapshotsEnabled) {
-                is_snapshot_userspace_ = false;
-                LOG(INFO) << "User-space snapshots disabled for testing";
-            } else {
-                is_snapshot_userspace_ = true;
-                LOG(INFO) << "User-space snapshots enabled for testing";
-            }
+        // Clear the cached client if any
+        if (snapuserd_client_) {
+            snapuserd_client_->CloseConnection();
+            snapuserd_client_ = nullptr;
         }
     }
     if (!WriteSnapshotUpdateStatus(lock.get(), status)) {
@@ -3506,9 +3483,6 @@ Return SnapshotManager::InitializeUpdateSnapshots(
             }
 
             CowOptions options;
-            if (device()->IsTestDevice()) {
-                options.scratch_space = false;
-            }
             options.compression = it->second.compression_algorithm();
 
             CowWriter writer(options);
@@ -3620,10 +3594,6 @@ std::unique_ptr<ISnapshotWriter> SnapshotManager::OpenCompressedSnapshotWriter(
     CowOptions cow_options;
     cow_options.compression = status.compression_algorithm();
     cow_options.max_blocks = {status.device_size() / cow_options.block_size};
-    // Disable scratch space for vts tests
-    if (device()->IsTestDevice()) {
-        cow_options.scratch_space = false;
-    }
 
     // Currently we don't support partial snapshots, since partition_cow_creator
     // never creates this scenario.
@@ -4262,4 +4232,4 @@ std::string SnapshotManager::ReadSourceBuildFingerprint() {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

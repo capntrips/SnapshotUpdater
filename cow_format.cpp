@@ -20,7 +20,7 @@
 
 #include <android-base/logging.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 std::ostream& operator<<(std::ostream& os, CowOperation const& op) {
@@ -106,4 +106,4 @@ bool IsOrderedOp(const CowOperation& op) {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

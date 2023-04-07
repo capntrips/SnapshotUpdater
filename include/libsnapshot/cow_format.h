@@ -17,7 +17,7 @@
 #include <stdint.h>
 #include <string>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 static constexpr uint64_t kCowMagicNumber = 0x436f77634f572121ULL;
@@ -194,4 +194,4 @@ bool IsMetadataOp(const CowOperation& op);
 bool IsOrderedOp(const CowOperation& op);
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

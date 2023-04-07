@@ -22,25 +22,39 @@
 #include <liblp/partition_opener.h>
 #include <libsnapshot/snapshot.h>
 
+// Forward declare IBootControl types since we cannot include only the headers
+// with Soong. Note: keep the enum width in sync.
 namespace android {
+    namespace hardware {
+        namespace boot {
+            namespace V1_1 {
+                enum class MergeStatus : int32_t;
+            }  // namespace V1_1
+        }  // namespace boot
+    }  // namespace hardware
+}  // namespace android
+
+namespace capntrips {
 namespace snapshot {
 
-class DeviceInfo final : public SnapshotManager::IDeviceInfo {
+class DeviceInfo final {
     using MergeStatus = android::hardware::boot::V1_1::MergeStatus;
+    using IImageManager = android::fiemap::IImageManager;
 
   public:
-    std::string GetMetadataDir() const override;
-    std::string GetSlotSuffix() const override;
-    std::string GetOtherSlotSuffix() const override;
-    const android::fs_mgr::IPartitionOpener& GetPartitionOpener() const override;
-    std::string GetSuperDevice(uint32_t slot) const override;
-    bool IsOverlayfsSetup() const override;
-    bool SetBootControlMergeStatus(MergeStatus status) override;
-    bool SetSlotAsUnbootable(unsigned int slot) override;
-    bool IsRecovery() const override;
-    std::unique_ptr<IImageManager> OpenImageManager() const override;
-    bool IsFirstStageInit() const override;
-    android::dm::IDeviceMapper& GetDeviceMapper() override;
+    std::string GetMetadataDir() const;
+    std::string GetSlotSuffix() const;
+    std::string GetOtherSlotSuffix() const;
+    const android::fs_mgr::IPartitionOpener& GetPartitionOpener() const;
+    std::string GetSuperDevice(uint32_t slot) const;
+    bool IsOverlayfsSetup() const;
+    bool SetBootControlMergeStatus(MergeStatus status);
+    bool SetSlotAsUnbootable(unsigned int slot);
+    bool IsRecovery() const;
+    std::unique_ptr<IImageManager> OpenImageManager() const;
+    std::unique_ptr<IImageManager> OpenImageManager(const std::string& gsid_dir) const;
+    bool IsFirstStageInit() const;
+    android::dm::IDeviceMapper& GetDeviceMapper();
 
     void set_first_stage_init(bool value) { first_stage_init_ = value; }
 
@@ -55,4 +69,4 @@ class DeviceInfo final : public SnapshotManager::IDeviceInfo {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

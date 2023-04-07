@@ -19,7 +19,7 @@
 
 #include <libfiemap/fiemap_status.h>
 
-namespace android::snapshot {
+namespace capntrips::snapshot {
 
 // SnapshotManager functions return either bool or Return objects. "Return" types provides
 // more information about the reason of the failure.
@@ -56,4 +56,4 @@ class Return {
     static ErrorCode FromFiemapStatusErrorCode(FiemapStatus::ErrorCode error_code);
 };
 
-}  // namespace android::snapshot
+}  // namespace capntrips::snapshot

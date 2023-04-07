@@ -34,7 +34,7 @@ using android::fs_mgr::Partition;
 using android::fs_mgr::SlotSuffixForSlotNumber;
 using chromeos_update_engine::DeltaArchiveManifest;
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 SnapshotMetadataUpdater::SnapshotMetadataUpdater(MetadataBuilder* builder, uint32_t target_slot,
                                                  const DeltaArchiveManifest& manifest)
@@ -272,7 +272,7 @@ bool SnapshotMetadataUpdater::MovePartitionsToCorrectGroup() const {
 
 bool SnapshotMetadataUpdater::Update() const {
     // Remove extents used by COW devices by removing the COW group completely.
-    builder_->RemoveGroupAndPartitions(android::snapshot::kCowGroupName);
+    builder_->RemoveGroupAndPartitions(capntrips::snapshot::kCowGroupName);
 
     // The order of these operations are important so that we
     // always have enough space to grow or add new partitions / groups.
@@ -290,4 +290,4 @@ bool SnapshotMetadataUpdater::Update() const {
     // clang-format on
 }
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

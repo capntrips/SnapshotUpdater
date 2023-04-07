@@ -26,7 +26,7 @@
 
 #include "utility.h"
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 // Helper class that modifies a super partition metadata for an update for
@@ -83,4 +83,4 @@ class SnapshotMetadataUpdater {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

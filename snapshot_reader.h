@@ -23,7 +23,7 @@
 #include <libsnapshot/cow_reader.h>
 #include <payload_consumer/file_descriptor.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 class ReadOnlyFileDescriptor : public chromeos_update_engine::FileDescriptor {
@@ -82,4 +82,4 @@ class CompressedSnapshotReader : public ReadOnlyFileDescriptor {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

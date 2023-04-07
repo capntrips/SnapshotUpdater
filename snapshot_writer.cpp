@@ -21,7 +21,7 @@
 #include <payload_consumer/file_descriptor.h>
 #include "snapshot_reader.h"
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 using android::base::borrowed_fd;
@@ -226,4 +226,4 @@ std::unique_ptr<FileDescriptor> OnlineKernelSnapshotWriter::OpenReader() {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

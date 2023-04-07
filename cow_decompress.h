@@ -18,7 +18,7 @@
 
 #include <libsnapshot/cow_reader.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 class IByteStream {
@@ -54,4 +54,4 @@ class IDecompressor {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

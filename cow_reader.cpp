@@ -31,7 +31,7 @@
 
 #include "cow_decompress.h"
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 CowReader::CowReader(ReaderFlags reader_flag)
@@ -785,4 +785,4 @@ bool CowReader::ReadData(const CowOperation& op, IByteSink* sink) {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

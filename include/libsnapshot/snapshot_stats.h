@@ -17,10 +17,11 @@
 #include <chrono>
 #include <memory>
 
-#include <android/snapshot/snapshot.pb.h>
+#include <capntrips/snapshot/snapshot.pb.h>
 #include <libsnapshot/snapshot.h>
+#include "device_info.h"
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 class ISnapshotMergeStats {
@@ -28,7 +29,7 @@ class ISnapshotMergeStats {
     virtual ~ISnapshotMergeStats() = default;
     // Called when merge starts or resumes.
     virtual bool Start() = 0;
-    virtual void set_state(android::snapshot::UpdateState state, bool using_compression) = 0;
+    virtual void set_state(capntrips::snapshot::UpdateState state, bool using_compression) = 0;
     virtual void set_cow_file_size(uint64_t cow_file_size) = 0;
     virtual void set_total_cow_size_bytes(uint64_t bytes) = 0;
     virtual void set_estimated_cow_size_bytes(uint64_t bytes) = 0;
@@ -67,7 +68,7 @@ class SnapshotMergeStats : public ISnapshotMergeStats {
 
     // ISnapshotMergeStats overrides
     bool Start() override;
-    void set_state(android::snapshot::UpdateState state, bool using_compression) override;
+    void set_state(capntrips::snapshot::UpdateState state, bool using_compression) override;
     void set_cow_file_size(uint64_t cow_file_size) override;
     uint64_t cow_file_size() override;
     void set_total_cow_size_bytes(uint64_t bytes) override;
@@ -98,4 +99,4 @@ class SnapshotMergeStats : public ISnapshotMergeStats {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

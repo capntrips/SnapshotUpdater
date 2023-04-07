@@ -22,7 +22,7 @@
 #include <brotli/decode.h>
 #include <zlib.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 class NoDecompressor final : public IDecompressor {
@@ -261,4 +261,4 @@ std::unique_ptr<IDecompressor> IDecompressor::Brotli() {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

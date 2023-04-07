@@ -23,9 +23,9 @@
 #include <liblp/builder.h>
 #include <update_engine/update_metadata.pb.h>
 
-#include <android/snapshot/snapshot.pb.h>
+#include <capntrips/snapshot/snapshot.pb.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 // Helper class that creates COW for a partition.
@@ -73,4 +73,4 @@ struct PartitionCowCreator {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

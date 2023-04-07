@@ -24,7 +24,7 @@ namespace chromeos_update_engine {
 class FileDescriptor;
 }  // namespace chromeos_update_engine
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 class ISnapshotWriter : public ICowWriter {
@@ -123,4 +123,4 @@ class OnlineKernelSnapshotWriter final : public ISnapshotWriter {
 };
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

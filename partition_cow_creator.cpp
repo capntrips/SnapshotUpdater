@@ -17,7 +17,7 @@
 #include <math.h>
 
 #include <android-base/logging.h>
-#include <android/snapshot/snapshot.pb.h>
+#include <capntrips/snapshot/snapshot.pb.h>
 #include <storage_literals/storage_literals.h>
 
 #include "dm_snapshot_internals.h"
@@ -32,7 +32,7 @@ using chromeos_update_engine::InstallOperation;
 template <typename T>
 using RepeatedPtrField = google::protobuf::RepeatedPtrField<T>;
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 static constexpr uint64_t kBlockSize = 4096;
@@ -261,4 +261,4 @@ std::optional<PartitionCowCreator::Return> PartitionCowCreator::Run() {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

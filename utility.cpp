@@ -38,7 +38,7 @@ using android::fs_mgr::Partition;
 using android::fs_mgr::ReadDefaultFstab;
 using google::protobuf::RepeatedPtrField;
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 void AutoDevice::Release() {
@@ -78,7 +78,7 @@ std::vector<Partition*> ListPartitionsWithSuffix(MetadataBuilder* builder,
     std::vector<Partition*> ret;
     for (const auto& group : builder->ListGroups()) {
         for (auto* partition : builder->ListPartitionsInGroup(group)) {
-            if (!base::EndsWith(partition->name(), suffix)) {
+            if (!android::base::EndsWith(partition->name(), suffix)) {
                 continue;
             }
             ret.push_back(partition);
@@ -209,4 +209,4 @@ bool IsDmSnapshotTestingEnabled() {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips

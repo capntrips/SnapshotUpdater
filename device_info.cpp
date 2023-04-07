@@ -19,7 +19,7 @@
 #include <fs_mgr_overlayfs.h>
 #include <libfiemap/image_manager.h>
 
-namespace android {
+namespace capntrips {
 namespace snapshot {
 
 #ifdef LIBSNAPSHOT_USE_HAL
@@ -123,10 +123,10 @@ bool DeviceInfo::SetSlotAsUnbootable([[maybe_unused]] unsigned int slot) {
 }
 
 std::unique_ptr<android::fiemap::IImageManager> DeviceInfo::OpenImageManager() const {
-    return IDeviceInfo::OpenImageManager("ota");
+    return DeviceInfo::OpenImageManager("ota");
 }
 
-std::unique_ptr<android::fiemap::IImageManager> ISnapshotManager::IDeviceInfo::OpenImageManager(
+std::unique_ptr<android::fiemap::IImageManager> DeviceInfo::OpenImageManager(
         const std::string& gsid_dir) const {
     if (IsRecovery() || IsFirstStageInit()) {
         android::fiemap::ImageManager::DeviceInfo device_info = {
@@ -144,4 +144,4 @@ android::dm::IDeviceMapper& DeviceInfo::GetDeviceMapper() {
 }
 
 }  // namespace snapshot
-}  // namespace android
+}  // namespace capntrips
