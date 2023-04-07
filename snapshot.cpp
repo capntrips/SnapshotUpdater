@@ -46,7 +46,6 @@
 #include <libsnapshot/snapshot_stats.h>
 #include "device_info.h"
 #include "partition_cow_creator.h"
-#include "snapshot_metadata_updater.h"
 #include "snapshot_reader.h"
 #include "utility.h"
 
@@ -56,7 +55,9 @@ using android::snapshot::EnsureSnapuserdStarted;
 namespace capntrips {
 namespace snapshot {
 
+using android::base::ReadFully;
 using android::base::unique_fd;
+using android::base::WriteFully;
 using android::dm::DeviceMapper;
 using android::dm::DmDeviceState;
 using android::dm::DmTable;
@@ -79,6 +80,7 @@ using android::hardware::boot::V1_1::MergeStatus;
 using chromeos_update_engine::DeltaArchiveManifest;
 using chromeos_update_engine::Extent;
 using chromeos_update_engine::FileDescriptor;
+using chromeos_update_engine::InstallOperation;
 using chromeos_update_engine::PartitionUpdate;
 template <typename T>
 using RepeatedPtrField = google::protobuf::RepeatedPtrField<T>;
@@ -3080,19 +3082,7 @@ void SnapshotManager::UnmapAndDeleteCowPartition(MetadataBuilder* current_metada
     }
 }
 
-static Return AddRequiredSpace(Return orig,
-                               const std::map<std::string, SnapshotStatus>& all_snapshot_status) {
-    if (orig.error_code() != Return::ErrorCode::NO_SPACE) {
-        return orig;
-    }
-    uint64_t sum = 0;
-    for (auto&& [name, status] : all_snapshot_status) {
-        sum += status.cow_file_size();
-    }
-    return Return::NoSpace(sum);
-}
-
-Return SnapshotManager::CreateUpdateSnapshots(const DeltaArchiveManifest& manifest) {
+Return SnapshotManager::CreateUpdateSnapshots(const std::string& target_partition_name, uint64_t snapshot_size) {
     auto lock = LockExclusive();
     if (!lock) return Return::Error();
 
@@ -3125,7 +3115,7 @@ Return SnapshotManager::CreateUpdateSnapshots(const DeltaArchiveManifest& manife
     }
 
     auto target_metadata =
-            MetadataBuilder::NewForUpdate(opener, current_super, current_slot, target_slot);
+            MetadataBuilder::New(opener, current_super, target_slot);
     if (target_metadata == nullptr) {
         LOG(ERROR) << "Cannot create target metadata builder.";
         return Return::Error();
@@ -3137,12 +3127,6 @@ Return SnapshotManager::CreateUpdateSnapshots(const DeltaArchiveManifest& manife
         if (android::base::EndsWith(group_name, target_suffix)) {
             current_metadata->RemoveGroupAndPartitions(group_name);
         }
-    }
-
-    SnapshotMetadataUpdater metadata_updater(target_metadata.get(), target_slot, manifest);
-    if (!metadata_updater.Update()) {
-        LOG(ERROR) << "Cannot calculate new metadata.";
-        return Return::Error();
     }
 
     // Delete previous COW partitions in current_metadata so that PartitionCowCreator marks those as
@@ -3164,31 +3148,6 @@ Return SnapshotManager::CreateUpdateSnapshots(const DeltaArchiveManifest& manife
     // these devices.
     AutoDeviceList created_devices;
 
-    const auto& dap_metadata = manifest.dynamic_partition_metadata();
-    CowOptions options;
-    CowWriter writer(options);
-    bool cow_format_support = true;
-    if (dap_metadata.cow_version() < writer.GetCowVersion()) {
-        cow_format_support = false;
-    }
-
-    LOG(INFO) << " dap_metadata.cow_version(): " << dap_metadata.cow_version()
-              << " writer.GetCowVersion(): " << writer.GetCowVersion();
-
-    bool use_compression = IsCompressionEnabled() && dap_metadata.vabc_enabled() &&
-                           !device_->IsRecovery() && cow_format_support;
-
-    std::string compression_algorithm;
-    if (use_compression) {
-        compression_algorithm = dap_metadata.vabc_compression_param();
-        if (compression_algorithm.empty()) {
-            // Older OTAs don't set an explicit compression type, so default to gz.
-            compression_algorithm = "gz";
-        }
-    } else {
-        compression_algorithm = "none";
-    }
-
     PartitionCowCreator cow_creator{
             .target_metadata = target_metadata.get(),
             .target_suffix = target_suffix,
@@ -3197,12 +3156,11 @@ Return SnapshotManager::CreateUpdateSnapshots(const DeltaArchiveManifest& manife
             .current_suffix = current_suffix,
             .update = nullptr,
             .extra_extents = {},
-            .compression_enabled = use_compression,
-            .compression_algorithm = compression_algorithm,
+            .compression_enabled = false,
+            .compression_algorithm = "none",
     };
 
-    auto ret = CreateUpdateSnapshotsInternal(lock.get(), manifest, &cow_creator, &created_devices,
-                                             &all_snapshot_status);
+    auto ret = CreateUpdateSnapshotsInternal(lock.get(), target_partition_name, snapshot_size, &cow_creator, &created_devices);
     if (!ret.is_ok()) return ret;
 
     auto exported_target_metadata = target_metadata->Export();
@@ -3210,11 +3168,6 @@ Return SnapshotManager::CreateUpdateSnapshots(const DeltaArchiveManifest& manife
         LOG(ERROR) << "Cannot export target metadata";
         return Return::Error();
     }
-
-    ret = InitializeUpdateSnapshots(lock.get(), target_metadata.get(),
-                                    exported_target_metadata.get(), target_suffix,
-                                    all_snapshot_status);
-    if (!ret.is_ok()) return ret;
 
     if (!UpdatePartitionTable(opener, device_->GetSuperDevice(target_slot),
                               *exported_target_metadata, target_slot)) {
@@ -3242,7 +3195,6 @@ Return SnapshotManager::CreateUpdateSnapshots(const DeltaArchiveManifest& manife
 
     SnapshotUpdateStatus status = ReadSnapshotUpdateStatus(lock.get());
     status.set_state(update_state);
-    status.set_compression_enabled(cow_creator.compression_enabled);
     if (cow_creator.compression_enabled) {
         bool userSnapshotsEnabled = IsUserspaceSnapshotsEnabled();
         const std::string UNKNOWN = "unknown";
@@ -3294,155 +3246,213 @@ Return SnapshotManager::CreateUpdateSnapshots(const DeltaArchiveManifest& manife
 }
 
 Return SnapshotManager::CreateUpdateSnapshotsInternal(
-        LockedFile* lock, const DeltaArchiveManifest& manifest, PartitionCowCreator* cow_creator,
-        AutoDeviceList* created_devices,
-        std::map<std::string, SnapshotStatus>* all_snapshot_status) {
+        LockedFile* lock, const std::string& target_partition_name, uint64_t snapshot_size, PartitionCowCreator* cow_creator,
+        AutoDeviceList* created_devices) {
     CHECK(lock);
 
     auto* target_metadata = cow_creator->target_metadata;
     const auto& target_suffix = cow_creator->target_suffix;
 
-    if (!target_metadata->AddGroup(kCowGroupName, 0)) {
-        LOG(ERROR) << "Cannot add group " << kCowGroupName;
+    auto pu = new PartitionUpdate();
+    pu->set_partition_name(target_partition_name);
+    pu->mutable_new_partition_info()->set_size(snapshot_size);
+
+    auto op = pu->add_operations();
+    op->set_type(InstallOperation::REPLACE);
+    op->set_data_offset(0);
+    op->set_data_length(snapshot_size);
+
+    auto de = op->add_dst_extents();
+    de->set_start_block(0);
+    de->set_num_blocks(snapshot_size / 4096);
+
+    auto target_partition = target_metadata->FindPartition(target_partition_name);
+    if (target_partition == nullptr) {
+        LOG(ERROR) << "Cannot find partition " << target_partition_name;
         return Return::Error();
     }
 
-    std::map<std::string, const PartitionUpdate*> partition_map;
-    std::map<std::string, std::vector<Extent>> extra_extents_map;
-    for (const auto& partition_update : manifest.partitions()) {
-        auto suffixed_name = partition_update.partition_name() + target_suffix;
-        auto&& [it, inserted] = partition_map.emplace(suffixed_name, &partition_update);
-        if (!inserted) {
-            LOG(ERROR) << "Duplicated partition " << partition_update.partition_name()
-                       << " in update manifest.";
-            return Return::Error();
-        }
-
-        auto& extra_extents = extra_extents_map[suffixed_name];
-        if (partition_update.has_hash_tree_extent()) {
-            extra_extents.push_back(partition_update.hash_tree_extent());
-        }
-        if (partition_update.has_fec_extent()) {
-            extra_extents.push_back(partition_update.fec_extent());
-        }
+    if (!UnmapPartitionWithSnapshot(lock, target_partition->name())) {
+        LOG(ERROR) << "Cannot unmap " << target_partition->name();
+        return Return::Error();
     }
 
-    for (auto* target_partition : ListPartitionsWithSuffix(target_metadata, target_suffix)) {
-        cow_creator->target_partition = target_partition;
-        cow_creator->update = nullptr;
-        auto iter = partition_map.find(target_partition->name());
-        if (iter != partition_map.end()) {
-            cow_creator->update = iter->second;
-        } else {
-            LOG(INFO) << target_partition->name()
-                      << " isn't included in the payload, skipping the cow creation.";
-            continue;
-        }
+    target_metadata->RemovePartition(GetCowName(target_partition->name()));
 
-        cow_creator->extra_extents.clear();
-        auto extra_extents_it = extra_extents_map.find(target_partition->name());
-        if (extra_extents_it != extra_extents_map.end()) {
-            cow_creator->extra_extents = std::move(extra_extents_it->second);
-        }
-
-        // Compute the device sizes for the partition.
-        auto cow_creator_ret = cow_creator->Run();
-        if (!cow_creator_ret.has_value()) {
-            LOG(ERROR) << "PartitionCowCreator returned no value for " << target_partition->name();
+    if (pending_resize_) {
+        const auto& [partition, partition_size] = pending_resize_.value();
+        if (!target_metadata->ResizePartition(partition.get(), partition_size)) {
+            LOG(ERROR) << "Cannot resize partition " << partition->name() << " to " << partition_size;
             return Return::Error();
         }
+    }
+    pending_resize_->first.release();
+    pending_resize_.reset();
 
-        LOG(INFO) << "For partition " << target_partition->name()
-                  << ", device size = " << cow_creator_ret->snapshot_status.device_size()
-                  << ", snapshot size = " << cow_creator_ret->snapshot_status.snapshot_size()
-                  << ", cow partition size = "
-                  << cow_creator_ret->snapshot_status.cow_partition_size()
-                  << ", cow file size = " << cow_creator_ret->snapshot_status.cow_file_size();
+    if (snapshot_size > target_partition->size()) {
+        auto diff = snapshot_size - target_partition->size();
 
-        // Delete any existing snapshot before re-creating one.
-        if (!DeleteSnapshot(lock, target_partition->name())) {
-            LOG(ERROR) << "Cannot delete existing snapshot before creating a new one for partition "
-                       << target_partition->name();
-            return Return::Error();
+        uint64_t target_cow_partition_size = 0;
+        SnapshotStatus target_status;
+        if (ReadSnapshotStatus(lock, target_partition->name(), &target_status)) {
+            target_cow_partition_size = target_status.cow_partition_size();
         }
+        if (target_cow_partition_size < diff) {
+            auto needed_bytes = diff - target_cow_partition_size;
 
-        // It is possible that the whole partition uses free space in super, and snapshot / COW
-        // would not be needed. In this case, skip the partition.
-        bool needs_snapshot = cow_creator_ret->snapshot_status.snapshot_size() > 0;
-        bool needs_cow = (cow_creator_ret->snapshot_status.cow_partition_size() +
-                          cow_creator_ret->snapshot_status.cow_file_size()) > 0;
-        CHECK(needs_snapshot == needs_cow);
+            std::vector<std::string> snapshots;
+            if (!ListSnapshots(lock, &snapshots)) {
+                LOG(ERROR) << "Cannot list snapshots";
+                return Return::Error();
+            }
+            std::optional<std::tuple<std::string, uint64_t , uint64_t>> snapshot;
+            for (const auto& name : snapshots) {
+                SnapshotStatus snapshot_status;
+                if (!ReadSnapshotStatus(lock, name, &snapshot_status)) {
+                    LOG(ERROR) << "Cannot read snapshot status: " << name;
+                    return Return::Error();
+                }
+                if (snapshot_status.cow_partition_size() >= needed_bytes && (!snapshot || snapshot_status.cow_partition_size() < std::get<2>(snapshot.value()))) {
+                    snapshot.emplace(name, snapshot_status.snapshot_size(), snapshot_status.cow_partition_size());
+                }
+            }
 
-        if (!needs_snapshot) {
-            LOG(INFO) << "Skip creating snapshot for partition " << target_partition->name()
-                      << "because nothing needs to be snapshotted.";
-            continue;
-        }
-
-        // Find the original partition size.
-        auto name = target_partition->name();
-        auto old_partition_name =
-                name.substr(0, name.size() - target_suffix.size()) + cow_creator->current_suffix;
-        auto old_partition = cow_creator->current_metadata->FindPartition(old_partition_name);
-        if (old_partition) {
-            cow_creator_ret->snapshot_status.set_old_partition_size(old_partition->size());
-        }
-
-        // Store these device sizes to snapshot status file.
-        if (!CreateSnapshot(lock, cow_creator, &cow_creator_ret->snapshot_status)) {
-            return Return::Error();
-        }
-        created_devices->EmplaceBack<AutoDeleteSnapshot>(this, lock, target_partition->name());
-
-        // Create the COW partition. That is, use any remaining free space in super partition before
-        // creating the COW images.
-        if (cow_creator_ret->snapshot_status.cow_partition_size() > 0) {
-            CHECK(cow_creator_ret->snapshot_status.cow_partition_size() % kSectorSize == 0)
-                    << "cow_partition_size == "
-                    << cow_creator_ret->snapshot_status.cow_partition_size()
-                    << " is not a multiple of sector size " << kSectorSize;
-            auto cow_partition = target_metadata->AddPartition(GetCowName(target_partition->name()),
-                                                               kCowGroupName, 0 /* flags */);
-            if (cow_partition == nullptr) {
+            if (!snapshot) {
+                LOG(ERROR) << "Cannot find snapshot to offload";
                 return Return::Error();
             }
 
-            if (!target_metadata->ResizePartition(
-                        cow_partition, cow_creator_ret->snapshot_status.cow_partition_size(),
-                        cow_creator_ret->cow_partition_usable_regions)) {
-                LOG(ERROR) << "Cannot create COW partition on metadata with size "
-                           << cow_creator_ret->snapshot_status.cow_partition_size();
+            pending_resize_.emplace(target_partition, snapshot_size);
+
+            const auto& [ name, size, _ ] = snapshot.value();
+            TemporaryFile backup_file;
+            if (!BackupSnapshot(lock, backup_file, name, size)) {
+                LOG(ERROR) << "Cannot backup snapshot " << name;
                 return Return::Error();
             }
-            // Only the in-memory target_metadata is modified; nothing to clean up if there is an
-            // error in the future.
+            if (!CreateUpdateSnapshotsInternal(lock, name, size, cow_creator, created_devices)) {
+                LOG(ERROR) << "Cannot update snapshot " << name;
+                return Return::Error();
+            }
+            if (!RestoreSnapshot(lock, backup_file, name, size)) {
+                LOG(ERROR) << "Cannot restore backup of snapshot " << name;
+                return Return::Error();
+            }
         }
-
-        all_snapshot_status->emplace(target_partition->name(),
-                                     std::move(cow_creator_ret->snapshot_status));
-
-        LOG(INFO) << "Successfully created snapshot partition for " << target_partition->name();
     }
 
-    LOG(INFO) << "Allocating CoW images.";
+    if (target_partition->size() != snapshot_size) {
+        if (!target_metadata->ResizePartition(target_partition, snapshot_size)) {
+            LOG(ERROR) << "Cannot resize partition " << target_partition->name() << " to " << snapshot_size;
+            return Return::Error();
+        }
+    }
 
-    for (auto&& [name, snapshot_status] : *all_snapshot_status) {
-        // Create the backing COW image if necessary.
-        if (snapshot_status.cow_file_size() > 0) {
-            auto ret = CreateCowImage(lock, name);
-            if (!ret.is_ok()) return AddRequiredSpace(ret, *all_snapshot_status);
+    cow_creator->target_partition = target_partition;
+    cow_creator->update = pu;
+
+    // Compute the device sizes for the partition.
+    auto cow_creator_ret = cow_creator->Run();
+    if (!cow_creator_ret.has_value()) {
+        LOG(ERROR) << "PartitionCowCreator returned no value for " << target_partition->name();
+        return Return::Error();
+    }
+
+    LOG(INFO) << "For partition " << target_partition->name()
+              << ", device size = " << cow_creator_ret->snapshot_status.device_size()
+              << ", snapshot size = " << cow_creator_ret->snapshot_status.snapshot_size()
+              << ", cow partition size = "
+              << cow_creator_ret->snapshot_status.cow_partition_size()
+              << ", cow file size = " << cow_creator_ret->snapshot_status.cow_file_size();
+
+    // Delete any existing snapshot before re-creating one.
+    if (!DeleteSnapshot(lock, target_partition->name())) {
+        LOG(ERROR) << "Cannot delete existing snapshot before creating a new one for partition "
+                   << target_partition->name();
+        return Return::Error();
+    }
+
+    // It is possible that the whole partition uses free space in super, and snapshot / COW
+    // would not be needed. In this case, skip the partition.
+    bool needs_snapshot = cow_creator_ret->snapshot_status.snapshot_size() > 0;
+    bool needs_cow = (cow_creator_ret->snapshot_status.cow_partition_size() +
+                      cow_creator_ret->snapshot_status.cow_file_size()) > 0;
+    CHECK(needs_snapshot == needs_cow);
+
+    if (!needs_snapshot) {
+        LOG(ERROR) << "Skip creating snapshot for partition " << target_partition->name()
+                  << "because nothing needs to be snapshotted.";
+        return Return::Error();
+    }
+
+    // Find the original partition size.
+    auto name = target_partition->name();
+    auto old_partition_name =
+            name.substr(0, name.size() - target_suffix.size()) + cow_creator->current_suffix;
+    auto old_partition = cow_creator->current_metadata->FindPartition(old_partition_name);
+    if (old_partition) {
+        cow_creator_ret->snapshot_status.set_old_partition_size(old_partition->size());
+    }
+
+    // Store these device sizes to snapshot status file.
+    if (!CreateSnapshot(lock, cow_creator, &cow_creator_ret->snapshot_status)) {
+        return Return::Error();
+    }
+    created_devices->EmplaceBack<AutoDeleteSnapshot>(this, lock, target_partition->name());
+
+    // Create the COW partition. That is, use any remaining free space in super partition before
+    // creating the COW images.
+    if (cow_creator_ret->snapshot_status.cow_partition_size() > 0) {
+        CHECK(cow_creator_ret->snapshot_status.cow_partition_size() % kSectorSize == 0)
+                << "cow_partition_size == "
+                << cow_creator_ret->snapshot_status.cow_partition_size()
+                << " is not a multiple of sector size " << kSectorSize;
+        auto cow_partition = target_metadata->AddPartition(GetCowName(target_partition->name()),
+                                                           kCowGroupName, 0 /* flags */);
+        if (cow_partition == nullptr) {
+            return Return::Error();
         }
 
-        LOG(INFO) << "Successfully created snapshot for " << name;
+        if (!target_metadata->ResizePartition(
+                    cow_partition, cow_creator_ret->snapshot_status.cow_partition_size(),
+                    cow_creator_ret->cow_partition_usable_regions)) {
+            LOG(ERROR) << "Cannot create COW partition on metadata with size "
+                       << cow_creator_ret->snapshot_status.cow_partition_size();
+            return Return::Error();
+        }
+        // Only the in-memory target_metadata is modified; nothing to clean up if there is an
+        // error in the future.
     }
+
+    LOG(INFO) << "Successfully created snapshot partition for " << target_partition->name();
+
+    LOG(INFO) << "Allocating CoW image.";
+
+    if (cow_creator_ret->snapshot_status.cow_file_size() > 0) {
+        auto ret = CreateCowImage(lock, target_partition->name());
+        if (!ret.is_ok()) return ret;
+    }
+
+    LOG(INFO) << "Successfully created snapshot for " << target_partition->name();
+
+    auto exported_target_metadata = target_metadata->Export();
+    if (exported_target_metadata == nullptr) {
+        LOG(ERROR) << "Cannot export target metadata";
+        return Return::Error();
+    }
+
+    auto ret = InitializeUpdateSnapshot(lock, target_partition,
+                                    exported_target_metadata.get(),
+                                    cow_creator_ret->snapshot_status);
+    if (!ret.is_ok()) return Return::Error();
 
     return Return::Ok();
 }
 
-Return SnapshotManager::InitializeUpdateSnapshots(
-        LockedFile* lock, MetadataBuilder* target_metadata,
-        const LpMetadata* exported_target_metadata, const std::string& target_suffix,
-        const std::map<std::string, SnapshotStatus>& all_snapshot_status) {
+Return SnapshotManager::InitializeUpdateSnapshot(
+        LockedFile* lock, Partition* target_partition,
+        const LpMetadata* exported_target_metadata,
+        const SnapshotStatus& snapshot_status) {
     CHECK(lock);
 
     CreateLogicalPartitionParams cow_params{
@@ -3451,56 +3461,135 @@ Return SnapshotManager::InitializeUpdateSnapshots(
             .timeout_ms = std::chrono::milliseconds::max(),
             .partition_opener = &device_->GetPartitionOpener(),
     };
-    for (auto* target_partition : ListPartitionsWithSuffix(target_metadata, target_suffix)) {
-        AutoDeviceList created_devices_for_cow;
 
-        if (!UnmapPartitionWithSnapshot(lock, target_partition->name())) {
-            LOG(ERROR) << "Cannot unmap existing COW devices before re-mapping them for zero-fill: "
-                       << target_partition->name();
+    AutoDeviceList created_devices_for_cow;
+
+    if (!UnmapPartitionWithSnapshot(lock, target_partition->name())) {
+        LOG(ERROR) << "Cannot unmap existing COW devices before re-mapping them for zero-fill: "
+                   << target_partition->name();
+        return Return::Error();
+    }
+
+    cow_params.partition_name = target_partition->name();
+    std::string cow_name;
+    if (!MapCowDevices(lock, cow_params, snapshot_status, &created_devices_for_cow, &cow_name)) {
+        return Return::Error();
+    }
+
+    std::string cow_path;
+    if (!images_->GetMappedImageDevice(cow_name, &cow_path)) {
+        LOG(ERROR) << "Cannot determine path for " << cow_name;
+        return Return::Error();
+    }
+
+    if (snapshot_status.compression_enabled()) {
+        unique_fd fd(open(cow_path.c_str(), O_RDWR | O_CLOEXEC));
+        if (fd < 0) {
+            PLOG(ERROR) << "open " << cow_path << " failed for snapshot "
+                        << cow_params.partition_name;
             return Return::Error();
         }
 
-        auto it = all_snapshot_status.find(target_partition->name());
-        if (it == all_snapshot_status.end()) continue;
-        cow_params.partition_name = target_partition->name();
-        std::string cow_name;
-        if (!MapCowDevices(lock, cow_params, it->second, &created_devices_for_cow, &cow_name)) {
+        CowOptions options;
+        options.compression = snapshot_status.compression_algorithm();
+
+        CowWriter writer(options);
+        if (!writer.Initialize(fd) || !writer.Finalize()) {
+            LOG(ERROR) << "Could not initialize COW device for " << target_partition->name();
             return Return::Error();
         }
-
-        std::string cow_path;
-        if (!images_->GetMappedImageDevice(cow_name, &cow_path)) {
-            LOG(ERROR) << "Cannot determine path for " << cow_name;
+    } else {
+        auto ret = InitializeKernelCow(cow_path);
+        if (!ret.is_ok()) {
+            LOG(ERROR) << "Can't zero-fill COW device for " << target_partition->name() << ": "
+                       << cow_path;
             return Return::Error();
         }
+    }
 
-        if (it->second.compression_enabled()) {
-            unique_fd fd(open(cow_path.c_str(), O_RDWR | O_CLOEXEC));
-            if (fd < 0) {
-                PLOG(ERROR) << "open " << cow_path << " failed for snapshot "
-                            << cow_params.partition_name;
-                return Return::Error();
-            }
+    created_devices_for_cow.Release();
 
-            CowOptions options;
-            options.compression = it->second.compression_algorithm();
+    if (!UnmapCowDevices(lock, target_partition->name())) {
+        return Return::Error();
+    }
 
-            CowWriter writer(options);
-            if (!writer.Initialize(fd) || !writer.Finalize()) {
-                LOG(ERROR) << "Could not initialize COW device for " << target_partition->name();
-                return Return::Error();
-            }
-        } else {
-            auto ret = InitializeKernelCow(cow_path);
-            if (!ret.is_ok()) {
-                LOG(ERROR) << "Can't zero-fill COW device for " << target_partition->name() << ": "
-                           << cow_path;
-                return AddRequiredSpace(ret, all_snapshot_status);
-            }
-        }
-        // Let destructor of created_devices_for_cow to unmap the COW devices.
-    };
+    if (!MapPartitionWithSnapshot(lock, cow_params, SnapshotContext::Update, nullptr)) {
+        return Return::Error();
+    }
+
     return Return::Ok();
+}
+
+bool SnapshotManager::BackupSnapshot(LockedFile* lock, TemporaryFile& backup_file, const std::string& target_partition_name, uint64_t snapshot_size) {
+    CHECK(lock);
+
+    if (!EnsureImageManager()) return false;
+
+    std::string device;
+    if (!GetMappedImageDevicePath(target_partition_name, &device)) {
+        LOG(ERROR) << "Could not determine path for: " << target_partition_name;
+        return false;
+    }
+
+    unique_fd fd(open(device.c_str(), O_RDONLY | O_BINARY));
+    if (fd < 0) {
+        LOG(ERROR) << "Can't open device for reading: " << device;
+        return false;
+    }
+
+    uint8_t chunk[4096];
+    uint64_t written = 0;
+    while (written < snapshot_size) {
+        if (!ReadFully(fd, chunk, sizeof chunk)) {
+            LOG(ERROR) << "failed to read chunk: " << strerror(errno);
+            return false;
+        }
+        if (!WriteFully(backup_file.fd, chunk, sizeof chunk)) {
+            LOG(ERROR) << "failed to write chunk: " << strerror(errno);
+            return false;
+        }
+        written += sizeof chunk;
+    }
+
+    lseek(backup_file.fd, 0, SEEK_SET);
+
+    LOG(INFO) << "Successfully backed up snapshot " << target_partition_name;
+
+    return true;
+}
+
+bool SnapshotManager::RestoreSnapshot(LockedFile* lock, TemporaryFile& backup_file, const std::string& target_partition_name, uint64_t snapshot_size) {
+    CHECK(lock);
+
+    std::string device;
+    if (!GetMappedImageDevicePath(target_partition_name, &device)) {
+        LOG(ERROR) << "Could not determine path for: " << target_partition_name;
+        return false;
+    }
+
+    unique_fd fd(open(device.c_str(), O_WRONLY | O_BINARY));
+    if (fd < 0) {
+        LOG(ERROR) << "Can't open device for reading: " << device;
+        return false;
+    }
+
+    uint8_t chunk[4096];
+    uint64_t written = 0;
+    while (written < snapshot_size) {
+        if (!ReadFully(backup_file.fd, chunk, sizeof chunk)) {
+            LOG(ERROR) << "failed to read chunk: " << strerror(errno);
+            return false;
+        }
+        if (!WriteFully(fd, chunk, sizeof chunk)) {
+            LOG(ERROR) << "failed to write chunk: " << strerror(errno);
+            return false;
+        }
+        written += sizeof chunk;
+    }
+
+    LOG(INFO) << "Successfully restored backup of snapshot " << target_partition_name;
+
+    return true;
 }
 
 bool SnapshotManager::MapUpdateSnapshot(const CreateLogicalPartitionParams& params,

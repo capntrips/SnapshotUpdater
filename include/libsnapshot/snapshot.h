@@ -26,6 +26,7 @@
 #include <string_view>
 #include <vector>
 
+#include <android-base/file.h>
 #include <android-base/unique_fd.h>
 #include <capntrips/snapshot/snapshot.pb.h>
 #include <fs_mgr_dm_linear.h>
@@ -98,6 +99,7 @@ class SnapshotManager final {
     using CreateLogicalPartitionParams = android::fs_mgr::CreateLogicalPartitionParams;
     using IPartitionOpener = android::fs_mgr::IPartitionOpener;
     using LpMetadata = android::fs_mgr::LpMetadata;
+    using Partition = android::fs_mgr::Partition;
     using MetadataBuilder = android::fs_mgr::MetadataBuilder;
     using DeltaArchiveManifest = chromeos_update_engine::DeltaArchiveManifest;
     using MergeStatus = android::hardware::boot::V1_1::MergeStatus;
@@ -148,7 +150,7 @@ class SnapshotManager final {
     UpdateState GetUpdateState(double* progress = nullptr);
     bool UpdateUsesCompression();
     bool UpdateUsesUserSnapshots();
-    Return CreateUpdateSnapshots(const DeltaArchiveManifest& manifest);
+    Return CreateUpdateSnapshots(const std::string& target_partition_name, uint64_t snapshot_size);
     bool MapUpdateSnapshot(const CreateLogicalPartitionParams& params,
                            std::string* snapshot_path);
     std::unique_ptr<ISnapshotWriter> OpenSnapshotWriter(
@@ -495,16 +497,18 @@ class SnapshotManager final {
     // Helper for CreateUpdateSnapshots.
     // Creates all underlying images, COW partitions and snapshot files. Does not initialize them.
     Return CreateUpdateSnapshotsInternal(
-            LockedFile* lock, const DeltaArchiveManifest& manifest,
-            PartitionCowCreator* cow_creator, AutoDeviceList* created_devices,
-            std::map<std::string, SnapshotStatus>* all_snapshot_status);
+            LockedFile* lock, const std::string& target_partition_name, uint64_t snapshot_size,
+            PartitionCowCreator* cow_creator, AutoDeviceList* created_devices);
 
-    // Initialize snapshots so that they can be mapped later.
+    // Initialize and map the snapshot.
     // Map the COW partition and zero-initialize the header.
-    Return InitializeUpdateSnapshots(
-            LockedFile* lock, MetadataBuilder* target_metadata,
-            const LpMetadata* exported_target_metadata, const std::string& target_suffix,
-            const std::map<std::string, SnapshotStatus>& all_snapshot_status);
+    Return InitializeUpdateSnapshot(
+            LockedFile* lock, Partition* target_partition,
+            const LpMetadata* exported_target_metadata,
+            const SnapshotStatus& snapshot_status);
+
+    bool BackupSnapshot(LockedFile* lock, TemporaryFile& backup_file, const std::string& target_partition_name, uint64_t snapshot_size);
+    bool RestoreSnapshot(LockedFile* lock, TemporaryFile& backup_file, const std::string& target_partition_name, uint64_t snapshot_size);
 
     // Implementation of UnmapAllSnapshots(), with the lock provided.
     bool UnmapAllSnapshots(LockedFile* lock);
@@ -586,6 +590,7 @@ class SnapshotManager final {
     android::dm::IDeviceMapper& dm_;
     std::unique_ptr<DeviceInfo> device_;
     std::string metadata_dir_;
+    std::optional<std::pair<std::unique_ptr<Partition>, uint64_t>> pending_resize_;
     std::unique_ptr<IImageManager> images_;
     bool use_first_stage_snapuserd_ = false;
     bool in_factory_data_reset_ = false;

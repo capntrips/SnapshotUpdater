@@ -24,28 +24,32 @@
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/unique_fd.h>
+#include <fs_mgr.h>
 
 #include <libsnapshot/snapshot.h>
+#include "version.hpp"
 
 using namespace std::string_literals;
-
-int Usage() {
-    std::cerr << "snapshotctl: Control snapshots.\n"
-                 "Usage: snapshotctl [action] [flags]\n"
-                 "Actions:\n"
-                 "  dump\n"
-                 "    Print snapshot states.\n"
-                 "  map\n"
-                 "    Map all snapshots at /dev/block/mapper\n"
-                 "  unmap\n"
-                 "    Unmap all snapshots at /dev/block/mapper\n";
-    return EX_USAGE;
-}
 
 namespace capntrips {
 namespace snapshot {
 
-bool DumpCmdHandler(int /*argc*/, char** argv) {
+int Usage(int, char** argv) {
+    std::cerr << "SnapshotUpdater " << version << std::endl
+              << "Usage: " << argv[0] << " [action] [flags]" << std::endl
+              << "Actions" << std::endl
+              << "  dump" << std::endl
+              << "    Print snapshot states." << std::endl
+              << "  map" << std::endl
+              << "    Map all snapshots" << std::endl
+              << "  unmap" << std::endl
+              << "    Unmap all snapshots" << std::endl
+              << "  update <snapshot-name> <snapshot-size>" << std::endl
+              << "    Update snapshot" << std::endl;
+    return EX_USAGE;
+}
+
+bool DumpCmdHandler(int, char** argv) {
     android::base::InitLogging(argv, &android::base::StderrLogger);
     return SnapshotManager::New()->Dump(std::cout);
 }
@@ -61,11 +65,31 @@ bool UnmapCmdHandler(int, char** argv) {
     return SnapshotManager::New()->UnmapAllSnapshots();
 }
 
+bool UpdateCmdHandler(int argc, char** argv) {
+    if(argc != 4) {
+        std::cerr <<  "Usage: " << argv[0] << " update <partition-name> <snapshot-size>" << std::endl;
+        return EX_USAGE;
+    }
+    auto partition_name = argv[2];
+    auto target_partition_name = partition_name + fs_mgr_get_other_slot_suffix();
+    auto partition_size = strtoull(argv[3], nullptr, 0);
+    return SnapshotManager::New()->CreateUpdateSnapshots(target_partition_name, partition_size);
+}
+
+bool VersionCmdHandler(int, char** argv) {
+    android::base::InitLogging(argv, &android::base::StdioLogger);
+    LOG(INFO) << "SnapshotUpdater " << version;
+    return true;
+}
+
 static std::map<std::string, std::function<bool(int, char**)>> kCmdMap = {
         // clang-format off
         {"dump", DumpCmdHandler},
         {"map", MapCmdHandler},
         {"unmap", UnmapCmdHandler},
+        {"update", UpdateCmdHandler},
+        {"-v", VersionCmdHandler},
+        {"--version", VersionCmdHandler},
         // clang-format on
 };
 
@@ -75,7 +99,7 @@ static std::map<std::string, std::function<bool(int, char**)>> kCmdMap = {
 int main(int argc, char** argv) {
     using namespace capntrips::snapshot;
     if (argc < 2) {
-        return Usage();
+        return Usage(argc, argv);
     }
 
     for (const auto& cmd : kCmdMap) {
@@ -84,5 +108,5 @@ int main(int argc, char** argv) {
         }
     }
 
-    return Usage();
+    return Usage(argc, argv);
 }
