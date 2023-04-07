@@ -18,7 +18,6 @@
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
-#include "device_info.h"
 #include "utility.h"
 
 namespace capntrips {

@@ -19,7 +19,6 @@
 
 #include <capntrips/snapshot/snapshot.pb.h>
 #include <libsnapshot/snapshot.h>
-#include "device_info.h"
 
 namespace capntrips {
 namespace snapshot {

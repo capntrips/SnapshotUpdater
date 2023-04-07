@@ -19,8 +19,9 @@
 #ifdef LIBSNAPSHOT_USE_HAL
 #include <android/hardware/boot/1.1/IBootControl.h>
 #endif
+#include <libdm/dm.h>
+#include <libfiemap/image_manager.h>
 #include <liblp/partition_opener.h>
-#include <libsnapshot/snapshot.h>
 
 // Forward declare IBootControl types since we cannot include only the headers
 // with Soong. Note: keep the enum width in sync.

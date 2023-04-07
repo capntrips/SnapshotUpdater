@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "device_info.h"
+#include <libsnapshot/device_info.h>
 
 #include <android-base/logging.h>
 #include <fs_mgr.h>

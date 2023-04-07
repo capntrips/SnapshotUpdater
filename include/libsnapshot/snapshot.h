@@ -37,10 +37,10 @@
 #include <update_engine/update_metadata.pb.h>
 
 #include <libsnapshot/auto_device.h>
+#include <libsnapshot/device_info.h>
 #include <libsnapshot/return.h>
 #include <libsnapshot/snapshot_writer.h>
 #include <snapuserd/snapuserd_client.h>
-#include "device_info.h"
 
 #ifndef FRIEND_TEST
 #define FRIEND_TEST(test_set_name, individual_test) \
@@ -78,7 +78,6 @@ struct AutoDeleteCowImage;
 struct AutoDeleteSnapshot;
 struct AutoDeviceList;
 struct PartitionCowCreator;
-class DeviceInfo;
 class ISnapshotMergeStats;
 class SnapshotMergeStats;
 class SnapshotStatus;
@@ -138,7 +137,6 @@ class SnapshotManager final {
     // to cleanly exit.
     bool PerformSecondStageInitTransition();
 
-    // ISnapshotManagers.
     bool BeginUpdate();
     bool CancelUpdate();
     bool FinishedSnapshotWrites(bool wipe);

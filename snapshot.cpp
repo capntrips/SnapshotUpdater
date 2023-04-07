@@ -43,8 +43,8 @@
 #include <liblp/liblp.h>
 
 #include <capntrips/snapshot/snapshot.pb.h>
+#include <libsnapshot/device_info.h>
 #include <libsnapshot/snapshot_stats.h>
-#include "device_info.h"
 #include "partition_cow_creator.h"
 #include "snapshot_reader.h"
 #include "utility.h"

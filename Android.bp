@@ -74,6 +74,10 @@ cc_library_static {
     },
     srcs: [
         "capntrips/snapshot/snapshot.proto",
+        "cow_decompress.cpp",
+        "cow_reader.cpp",
+        "cow_writer.cpp",
+        "cow_format.cpp",
         "device_info.cpp",
         "snapshot.cpp",
         "snapshot_reader.cpp",
@@ -83,38 +87,6 @@ cc_library_static {
         "return.cpp",
         "utility.cpp",
     ],
-}
-
-cc_library_static {
-    name: "libsnapshot_cow_capntrips",
-    sanitize: {
-        misc_undefined: ["integer"],
-    },
-    local_include_dirs: ["include/"],
-    cflags: [
-        "-D_FILE_OFFSET_BITS=64",
-        "-Wall",
-        "-Werror",
-    ],
-    export_include_dirs: ["include"],
-    srcs: [
-        "cow_decompress.cpp",
-        "cow_reader.cpp",
-        "cow_writer.cpp",
-        "cow_format.cpp",
-    ],
-    host_supported: true,
-    recovery_available: true,
-    shared_libs: [
-        "libbase",
-        "liblog",
-    ],
-    static_libs: [
-        "libbrotli",
-        "libz",
-    ],
-    ramdisk_available: true,
-    vendor_ramdisk_available: true,
 }
 
 cc_binary {
@@ -133,7 +105,6 @@ cc_binary {
         "libfstab",
         "liblp",
         "libsnapshot_capntrips",
-        "libsnapshot_cow_capntrips",
         "libz",
         "update_metadata-protos",
     ],
@@ -174,7 +145,6 @@ cc_binary {
         "liblp",
         "libprotobuf-cpp-lite",
         "libsnapshot_capntrips",
-        "libsnapshot_cow_capntrips",
         "libstatslog",
         "libutils",
         "libvndksupport",
