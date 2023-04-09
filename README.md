@@ -1,5 +1,6 @@
 # SnapshotUpdater
-Snapshot Updater is an Android command-line tool that updates snapshots post-OTA.
+Snapshot Updater is an Android library and command-line tool that updates snapshots post-OTA. It was built on top of
+`libsnapshot` and `snapshotctl`.
 
 ## Usage
 
