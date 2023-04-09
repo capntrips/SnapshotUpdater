@@ -56,6 +56,7 @@ namespace capntrips {
 namespace snapshot {
 
 using android::base::ReadFully;
+using android::base::Realpath;
 using android::base::unique_fd;
 using android::base::WriteFully;
 using android::dm::DeviceMapper;
@@ -3305,13 +3306,43 @@ Return SnapshotManager::CreateUpdateSnapshotsInternal(
                 LOG(ERROR) << "Cannot list snapshots";
                 return Return::Error();
             }
+
+            android::fs_mgr::Fstab fstab;
+            if (!android::fs_mgr::ReadFstabFromFile("/proc/mounts", &fstab)) {
+                LOG(ERROR) << "Cannot scan mounted volumes";
+                return Return::Error();
+            }
+
             std::optional<std::tuple<std::string, uint64_t , uint64_t>> snapshot;
             for (const auto& name : snapshots) {
+                if (name == target_partition->name()) {
+                    continue;
+                }
+
                 SnapshotStatus snapshot_status;
                 if (!ReadSnapshotStatus(lock, name, &snapshot_status)) {
                     LOG(ERROR) << "Cannot read snapshot status: " << name;
                     return Return::Error();
                 }
+
+                std::string blk_device;
+                if (!GetMappedImageDevicePath(name, &blk_device)) {
+                    LOG(ERROR) << "Could not determine mapped device for " << name;
+                    return Return::Error();
+                }
+
+                auto it = std::find_if(fstab.begin(), fstab.end(), [&](const android::fs_mgr::FstabEntry& entry) {
+                    std::string real_path;
+                    if (!Realpath(entry.blk_device, &real_path)) {
+                        real_path = entry.blk_device;
+                    }
+                    return real_path == blk_device;
+                });
+                if (it != fstab.end()) {
+                    LOG(WARNING) << name << " is mounted";
+                    continue;
+                }
+
                 if (snapshot_status.cow_partition_size() >= needed_bytes && (!snapshot || snapshot_status.cow_partition_size() < std::get<2>(snapshot.value()))) {
                     snapshot.emplace(name, snapshot_status.snapshot_size(), snapshot_status.cow_partition_size());
                 }
@@ -3588,6 +3619,59 @@ bool SnapshotManager::RestoreSnapshot(LockedFile* lock, TemporaryFile& backup_fi
     }
 
     LOG(INFO) << "Successfully restored backup of snapshot " << target_partition_name;
+
+    return true;
+}
+
+bool SnapshotManager::DeleteSnapshot(const std::string& name) {
+    auto lock = LockExclusive();
+    if (!lock) return false;
+
+    const auto& opener = device_->GetPartitionOpener();
+    auto current_suffix = device_->GetSlotSuffix();
+    uint32_t current_slot = SlotNumberForSlotSuffix(current_suffix);
+    auto target_suffix = device_->GetOtherSlotSuffix();
+    uint32_t target_slot = SlotNumberForSlotSuffix(target_suffix);
+    auto current_super = device_->GetSuperDevice(current_slot);
+
+    auto target_metadata =
+            MetadataBuilder::New(opener, current_super, target_slot);
+    if (target_metadata == nullptr) {
+        LOG(ERROR) << "Cannot create target metadata builder.";
+        return false;
+    }
+
+    auto target_partition = target_metadata->FindPartition(name);
+    if (target_partition == nullptr) {
+        LOG(ERROR) << "Cannot find partition " << target_partition->name();
+        return false;
+    }
+
+    if (!UnmapPartitionWithSnapshot(lock.get(), target_partition->name())) {
+        LOG(ERROR) << "Cannot unmap " << target_partition->name();
+        return false;
+    }
+
+    target_metadata->RemovePartition(GetCowName(target_partition->name()));
+
+    if (!DeleteSnapshot(lock.get(), target_partition->name())) {
+        LOG(ERROR) << "Cannot delete snapshot " << target_partition->name();
+        return false;
+    }
+
+    auto exported_target_metadata = target_metadata->Export();
+    if (exported_target_metadata == nullptr) {
+        LOG(ERROR) << "Cannot export target metadata";
+        return false;
+    }
+
+    if (!UpdatePartitionTable(opener, device_->GetSuperDevice(target_slot),
+                              *exported_target_metadata, target_slot)) {
+        LOG(ERROR) << "Cannot write target metadata";
+        return false;
+    }
+
+    LOG(INFO) << "Successfully deleted snapshot " << target_partition->name();
 
     return true;
 }

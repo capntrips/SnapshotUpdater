@@ -45,7 +45,9 @@ int Usage(int, char** argv) {
               << "  unmap" << std::endl
               << "    Unmap all snapshots" << std::endl
               << "  update <snapshot-name> <snapshot-size>" << std::endl
-              << "    Update snapshot" << std::endl;
+              << "    Update snapshot" << std::endl
+              << "  delete <snapshot-name>" << std::endl
+              << "    Delete snapshot" << std::endl;
     return EX_USAGE;
 }
 
@@ -76,6 +78,17 @@ bool UpdateCmdHandler(int argc, char** argv) {
     return SnapshotManager::New()->CreateUpdateSnapshots(target_partition_name, partition_size);
 }
 
+bool DeleteCmdHandler(int argc, char** argv) {
+    android::base::InitLogging(argv, &android::base::StderrLogger);
+    if(argc != 3) {
+        std::cerr <<  "Usage: " << argv[0] << " delete <partition-name>" << std::endl;
+        return EX_USAGE;
+    }
+    auto partition_name = argv[2];
+    auto target_partition_name = partition_name + fs_mgr_get_other_slot_suffix();
+    return SnapshotManager::New()->DeleteSnapshot(target_partition_name);
+}
+
 bool VersionCmdHandler(int, char** argv) {
     android::base::InitLogging(argv, &android::base::StdioLogger);
     LOG(INFO) << "SnapshotUpdater " << version;
@@ -88,6 +101,7 @@ static std::map<std::string, std::function<bool(int, char**)>> kCmdMap = {
         {"map", MapCmdHandler},
         {"unmap", UnmapCmdHandler},
         {"update", UpdateCmdHandler},
+        {"delete", DeleteCmdHandler},
         {"-v", VersionCmdHandler},
         {"--version", VersionCmdHandler},
         // clang-format on

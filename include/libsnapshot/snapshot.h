@@ -149,6 +149,7 @@ class SnapshotManager final {
     bool UpdateUsesCompression();
     bool UpdateUsesUserSnapshots();
     Return CreateUpdateSnapshots(const std::string& target_partition_name, uint64_t snapshot_size);
+    bool DeleteSnapshot(const std::string& name);
     bool MapUpdateSnapshot(const CreateLogicalPartitionParams& params,
                            std::string* snapshot_path);
     std::unique_ptr<ISnapshotWriter> OpenSnapshotWriter(
